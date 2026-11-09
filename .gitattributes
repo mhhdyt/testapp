@@ -1,0 +1,4 @@
+# Paksa LF agar script bash & konfigurasi tetap jalan di Linux walau diedit di Windows
+* text=auto eol=lf
+*.png binary
+*.jpg binary
