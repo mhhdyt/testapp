@@ -50,70 +50,103 @@ testapp/
 │   ├── 00_create_database_user.sql   dijalankan di server MariaDB
 │   └── schema.sql                    tabel + data contoh
 ├── deploy/
-│   ├── deploy.sh           instal ke /var/www/testapp + konfigurasi nginx/php-fpm
+│   ├── deploy.sh           instal ke APP_DIR + konfigurasi nginx/php-fpm (ini + pool)
 │   ├── db-init.sh          uji koneksi & impor skema via mariadb-client
 │   ├── nginx/testapp.conf
-│   └── php/99-testapp.ini
+│   └── php/99-custom.ini   → /etc/php/8.3/fpm/conf.d/99-custom.ini
 └── .env.example
 ```
 
+## Topologi server
+
+| Server | Peran | Domain | Folder aplikasi | Database | User DB |
+|---|---|---|---|---|---|
+| SERVER 1 · web-01 (`10.10.14.7`) | produksi | `app.devyourtech.com` | `/var/www/app` | `app_prod` | `appuser` |
+| SERVER 2 · db-01 | MariaDB | — | — | — | — |
+| SERVER 3 · web-02 (`10.10.14.73`) | staging | `stg.devyourtech.com` | `/var/www/stg` | `app_stg` | `stguser` |
+
+Web-01 dan web-02 sama-sama memakai RAM 2 GB, PHP 8.3 (bawaan Ubuntu 24.04), dan konfigurasi PHP-FPM yang sama:
+
+- `99-custom.ini`: `upload_max_filesize`/`post_max_size` 64M, `memory_limit` 256M, `max_execution_time` 120;
+- pool `www.conf`: `pm.max_children` 12, `pm.start_servers` 3, `pm.min_spare_servers` 2, `pm.max_spare_servers` 5.
+
+Pada rilis Ubuntu lain, cek versi PHP dengan `ls /run/php/`, lalu jalankan deploy dengan `PHP_VER=<versi>`.
+
 ## Langkah deploy
 
-### 1. Siapkan database (di server MariaDB)
+### 1. Siapkan database (di db-01)
 
-Edit `database/00_create_database_user.sql`: ganti `10.0.0.20` dengan IP server aplikasi dan
-`GANTI_PASSWORD_KUAT` dengan password. Lalu jalankan di server MariaDB:
+Jika langkah 8.3 (buat database produksi & staging) sudah dijalankan, lewati langkah ini.
+Jika belum, salin `database/00_create_database_user.sql` ke db-01 lalu jalankan:
 
 ```bash
 sudo mariadb < 00_create_database_user.sql
 ```
 
-Agar bisa diakses dari server lain, pastikan `bind-address` di `/etc/mysql/mariadb.conf.d/50-server.cnf`
-bukan `127.0.0.1`, dan firewall membuka port 3306 **hanya** untuk IP server aplikasi.
+Agar web-01/web-02 bisa terhubung, pastikan `bind-address` di `/etc/mysql/mariadb.conf.d/50-server.cnf`
+bukan `127.0.0.1`, dan firewall membuka port 3306 **hanya** untuk `10.10.14.7` dan `10.10.14.73`.
 
-### 2. Upload aplikasi ke server aplikasi
+### 2. Upload aplikasi ke server web
 
-Dari Windows (PowerShell):
+Dari Windows (PowerShell), ke web-02 dan/atau web-01:
 
 ```powershell
-scp -r "C:\Users\IT\Desktop\Deploy Srv\testapp" user@IP-SERVER:~/
+scp -r "C:\Users\IT\Desktop\Deploy Srv\testapp" user@10.10.14.73:~/
+scp -r "C:\Users\IT\Desktop\Deploy Srv\testapp" user@10.10.14.7:~/
 ```
 
 ### 3. Jalankan deploy
 
 ```bash
 cd ~/testapp
-sudo DISABLE_DEFAULT_SITE=1 bash deploy/deploy.sh
-#   atau dengan domain:  sudo SERVER_NAME=testapp.kantor.local bash deploy/deploy.sh
+# SERVER 3 · web-02 (staging)
+sudo APP_DIR=/var/www/stg SERVER_NAME=stg.devyourtech.com bash deploy/deploy.sh
+# SERVER 1 · web-01 (produksi)
+sudo APP_DIR=/var/www/app SERVER_NAME=app.devyourtech.com bash deploy/deploy.sh
 ```
 
 Script ini akan:
 
 - mengecek semua paket;
-- menyalin ke `/var/www/testapp`;
+- menyalin ke `APP_DIR`;
 - membuat `.env`;
 - mengatur izin file (kode milik root, `uploads/` milik www-data, `.env` 640);
-- memasang `99-testapp.ini` dan site nginx;
+- memasang `/etc/php/8.3/fpm/conf.d/99-custom.ini` (dan menghapus `99-testapp.ini` lama bila ada);
+- mengatur pool PHP-FPM `pool.d/www.conf` (lewati dengan `TUNE_FPM_POOL=0`);
+- memasang site nginx;
 - menjalankan `nginx -t` dan `php-fpm8.3 -t`;
-- me-reload layanan;
+- me-restart php8.3-fpm dan me-reload nginx;
 - menjalankan cek sistem.
 
 ### 4. Isi kredensial database, lalu impor skema
 
+`.env` yang dibuat dari `.env.example` sudah berisi kredensial **staging**. Yang perlu diubah:
+
+- `DB_HOST` → IP db-01 (di kedua server);
+- **khusus web-01**: hapus tanda `#` pada 3 baris `DB_NAME`/`DB_USER`/`DB_PASS` produksi.
+
 ```bash
-sudo nano /var/www/testapp/.env                # DB_HOST, DB_USER, DB_PASS, ...
-sudo bash /var/www/testapp/deploy/db-init.sh   # uji koneksi + impor schema.sql
+# web-02
+sudo nano /var/www/stg/.env
+sudo bash /var/www/stg/deploy/db-init.sh /var/www/stg   # uji koneksi + impor schema.sql
+# web-01
+sudo nano /var/www/app/.env
+sudo bash /var/www/app/deploy/db-init.sh /var/www/app
 ```
 
 ### 5. Uji
 
+Ganti `DOMAIN` dengan `stg.devyourtech.com` (web-02) atau `app.devyourtech.com` (web-01).
+Ganti `APP_DIR` dengan `/var/www/stg` atau `/var/www/app`.
+
 | URL / perintah | Hasil yang diharapkan |
 |---|---|
-| `http://IP-SERVER/` | daftar 9 produk contoh, ringkasan Rupiah, grafik |
-| `http://IP-SERVER/system.php` | semua baris **OK** |
-| `curl -i http://IP-SERVER/health.php` | `HTTP/1.1 200` + JSON `"status": "ok"` |
-| `sudo -u www-data php8.3 /var/www/testapp/bin/check.php` | `Hasil: OK` (exit code 0) |
-| `curl -I http://IP-SERVER/.env` | `403 Forbidden` |
+| `http://DOMAIN/` | daftar 9 produk contoh, ringkasan Rupiah, grafik |
+| `http://DOMAIN/system.php` | semua baris **OK**, batas upload `64M`, `memory_limit=256M` |
+| `curl -i http://DOMAIN/health.php` | `HTTP/1.1 200` + JSON `"status": "ok"` |
+| `sudo -u www-data php8.3 APP_DIR/bin/check.php` | `Hasil: OK` (exit code 0) |
+| `curl -I http://DOMAIN/.env` | `403 Forbidden` |
+| `grep -E '^pm\.' /etc/php/8.3/fpm/pool.d/www.conf` | `max_children = 12`, `start_servers = 3`, `min_spare_servers = 2`, `max_spare_servers = 5` |
 
 Coba juga: tambah produk dengan gambar PNG/JPG, edit, hapus, dan ekspor CSV/XML/ZIP.
 
@@ -127,8 +160,8 @@ Coba juga: tambah produk dengan gambar PNG/JPG, edit, hapus, dan ekspor CSV/XML/
 | `SQLSTATE[HY000] [2002]` | Server DB tidak terjangkau: cek `bind-address`, firewall, `nc -zv DB_HOST 3306`. |
 | `SQLSTATE[HY000] [1045] Access denied` | Password salah atau user dibuat untuk host lain. Cek `SELECT user,host FROM mysql.user;`. |
 | `SSL is required, but the server does not support it` (db-init.sh) | Client MariaDB ≥ 11.4 mewajibkan SSL. Tambahkan `--skip-ssl` ke `args` di `db-init.sh`, atau aktifkan SSL di server DB. |
-| Upload gagal "Folder upload tidak bisa ditulis" | `sudo chown -R www-data:www-data /var/www/testapp/public/uploads` |
-| `413 Request Entity Too Large` | Naikkan `client_max_body_size` (nginx) dan `post_max_size`/`upload_max_filesize` (99-testapp.ini). |
+| Upload gagal "Folder upload tidak bisa ditulis" | `sudo chown -R www-data:www-data APP_DIR/public/uploads` |
+| `413 Request Entity Too Large` | Naikkan `client_max_body_size` (nginx) dan `post_max_size`/`upload_max_filesize` (99-custom.ini). Saat ini keduanya 64M. |
 
 Log: `/var/log/nginx/testapp.error.log` dan `journalctl -u php8.3-fpm`.
 Untuk melihat detail error di browser sementara waktu, set `APP_DEBUG=true` di `.env`.

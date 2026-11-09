@@ -3,11 +3,13 @@
 # Uji koneksi ke MariaDB dengan mariadb-client, lalu impor database/schema.sql.
 # Kredensial dibaca dari .env aplikasi.
 #
-# Pemakaian:  sudo bash /var/www/testapp/deploy/db-init.sh [APP_DIR]
+# Pemakaian:  sudo bash /var/www/stg/deploy/db-init.sh [APP_DIR]
+#   web-02 (staging) : sudo bash /var/www/stg/deploy/db-init.sh /var/www/stg
+#   web-01 (produksi): sudo bash /var/www/app/deploy/db-init.sh /var/www/app
 # =============================================================================
 set -euo pipefail
 
-APP_DIR="${1:-${APP_DIR:-/var/www/testapp}}"
+APP_DIR="${1:-${APP_DIR:-/var/www/stg}}"
 ENV_FILE="$APP_DIR/.env"
 SCHEMA="$APP_DIR/database/schema.sql"
 
@@ -51,8 +53,9 @@ if ! mariadb "${args[@]}" -e "SELECT VERSION() AS versi_server, CURRENT_USER() A
 
 Koneksi GAGAL. Periksa:
   - DB_HOST/DB_PORT/DB_USER/DB_PASS di $ENV_FILE
-  - User dibuat untuk IP server ini: CREATE USER 'testapp'@'<IP-server-aplikasi>' ...
-  - bind-address MariaDB & firewall port 3306 di server DB
+  - User dibuat untuk IP server ini (lihat database/00_create_database_user.sql):
+      web-01 -> 'appuser'@'10.10.14.7'   web-02 -> 'stguser'@'10.10.14.73'
+  - bind-address MariaDB & firewall port 3306 di db-01
   - Tes jaringan: nc -zv $DB_HOST $DB_PORT
 EOF
     exit 1

@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 /**
  * Cek sistem dari terminal.
- *   sudo -u www-data php8.3 /var/www/testapp/bin/check.php
+ *   sudo -u www-data php8.3 /var/www/stg/bin/check.php
  * Jalankan sebagai www-data agar uji izin folder uploads sesuai dengan php-fpm.
  * Exit code 1 jika ada pengecekan yang GAGAL.
  */

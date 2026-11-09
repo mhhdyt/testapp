@@ -1,7 +1,7 @@
 -- =============================================================================
 -- Skema + data contoh Test App Inventaris.
 -- Dari server aplikasi (memakai mariadb-client):
---     mariadb -h DB_HOST -u testapp -p testapp < database/schema.sql
+--     mariadb -h IP_DB01 -u stguser -p app_stg < database/schema.sql   (staging)
 -- atau otomatis lewat: sudo bash deploy/db-init.sh
 -- Aman dijalankan berulang (IF NOT EXISTS / INSERT IGNORE).
 -- =============================================================================
